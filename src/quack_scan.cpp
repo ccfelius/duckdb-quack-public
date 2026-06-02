@@ -2,6 +2,7 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret.hpp"
+#include "duckdb/common/types/uuid.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 
@@ -46,15 +47,19 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	auto client_wrapper = client_connection.GetClient(context);
 	auto &client = client_wrapper->GetClient();
 
-	auto bind_response = client.Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
+	auto query_id = UUID::GenerateRandomUUID();
+	auto client_query_id = client_connection.GenerateClientQueryId();
+	auto prepare_msg = make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query, query_id);
+	prepare_msg->SetClientQueryId(optional_idx(client_query_id));
+	auto bind_response = client.Request<PrepareResponseMessage>(context, std::move(prepare_msg));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->result_uuid = bind_response->ResultUUID();
+	bind_data->query_id = query_id;
+	bind_data->client_query_id = optional_idx(client_query_id);
 
 	return bind_data;
 }
@@ -92,16 +97,19 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	bind_data->client_connection = catalog.GetClientConnection();
 	auto client_wrapper = bind_data->client_connection->GetClient(context);
 	auto &client = client_wrapper->GetClient();
-	auto bind_response = client.Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query));
+	auto query_id = UUID::GenerateRandomUUID();
+	auto client_query_id = bind_data->client_connection->GenerateClientQueryId();
+	auto prepare_msg = make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query, query_id);
+	prepare_msg->SetClientQueryId(optional_idx(client_query_id));
+	auto bind_response = client.Request<PrepareResponseMessage>(context, std::move(prepare_msg));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
-	// new stuff
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->result_uuid = bind_response->ResultUUID();
+	bind_data->query_id = query_id;
+	bind_data->client_query_id = optional_idx(client_query_id);
 	return bind_data;
 }
 
@@ -144,10 +152,11 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
 	explicit QuackScanGlobalState(vector<ColumnIndex> column_ids_p, vector<idx_t> projection_id_p,
-	                              vector<ChunkResult> results_p, bool needs_more_fetch_p, hugeint_t result_uuid_p)
+	                              vector<ChunkResult> results_p, bool needs_more_fetch_p, hugeint_t query_id_p,
+	                              optional_idx client_query_id_p)
 	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(std::move(column_ids_p)),
-	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p), result_uuid(result_uuid_p),
-	      results(std::move(results_p)) {
+	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p), query_id(query_id_p),
+	      client_query_id(client_query_id_p), results(std::move(results_p)) {
 	}
 	idx_t MaxThreads() const override {
 		return max_threads;
@@ -156,7 +165,8 @@ struct QuackScanGlobalState : GlobalTableFunctionState {
 	vector<ColumnIndex> column_ids;
 	vector<idx_t> projection_ids;
 	atomic<bool> needs_more_fetch;
-	hugeint_t result_uuid;
+	hugeint_t query_id;
+	optional_idx client_query_id;
 
 	vector<ChunkResult> TryGetResults() {
 		lock_guard<mutex> guard(lock);
@@ -246,32 +256,36 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	// We execute the query here, right before scanning, so the result is fresh.
 	vector<ChunkResult> results;
 	bool needs_more_fetch = bind_data.needs_more_fetch;
-	hugeint_t result_uuid;
+	hugeint_t query_id;
+	optional_idx client_query_id;
 	if (!bind_data.table_name.empty()) {
 		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto &client_connection = *bind_data.client_connection;
 		auto client_wrapper = client_connection.GetClient(context);
 		auto &client = client_wrapper->GetClient();
-		auto response_message = client.Request<PrepareResponseMessage>(
-		    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
+		query_id = UUID::GenerateRandomUUID();
+		auto cq_id = client_connection.GenerateClientQueryId();
+		client_query_id = optional_idx(cq_id);
+		auto prepare_msg = make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query, query_id);
+		prepare_msg->SetClientQueryId(client_query_id);
+		auto response_message = client.Request<PrepareResponseMessage>(context, std::move(prepare_msg));
 		needs_more_fetch = response_message->NeedsMoreFetch();
-		// fetch the result
 		for (auto &chunk_ref : response_message->MutableResults()) {
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 		}
-		result_uuid = response_message->ResultUUID();
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::REQUIRES_PUSHDOWN);
 		}
-		result_uuid = bind_data.result_uuid;
+		query_id = bind_data.query_id;
+		client_query_id = bind_data.client_query_id;
 	}
 	// we only multithread if there is more to fetch
 	return make_uniq<QuackScanGlobalState>(input.column_indexes, input.projection_ids, std::move(results),
-	                                       needs_more_fetch, result_uuid);
+	                                       needs_more_fetch, query_id, client_query_id);
 }
 
 unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
@@ -324,9 +338,10 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 		// if that did not work, we request more results
 		if (local_state.results.empty() && global_state.needs_more_fetch) {
 			auto &client = local_state.client_wrapper->GetClient();
-			auto fetch_response = client.Request<FetchResponseMessage>(
-			    context,
-			    make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId(), global_state.result_uuid));
+			auto fetch_msg =
+			    make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId(), global_state.query_id);
+			fetch_msg->SetClientQueryId(global_state.client_query_id);
+			auto fetch_response = client.Request<FetchResponseMessage>(context, std::move(fetch_msg));
 
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done

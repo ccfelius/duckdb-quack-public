@@ -43,6 +43,11 @@
         "id": 1,
         "name": "sql_query",
         "type": "string"
+      },
+      {
+        "id": 2,
+        "name": "query_id",
+        "type": "hugeint_t"
       }
     ]
   },
@@ -51,7 +56,7 @@
     "members": [
       {
         "id": 1,
-        "name": "uuid",
+        "name": "query_id",
         "type": "hugeint_t"
       }
     ]
@@ -87,13 +92,8 @@
         "name": "results",
         "type": "vector<unique_ptr<DataChunkWrapper>>"
       },
-      {
-        "id": 5,
-        "name": "result_uuid",
-        "type": "hugeint_t"
-      }
     ],
-    "constructor": ["result_types", "result_names",  "results", "needs_more_fetch", "result_uuid"]
+    "constructor": ["result_types", "result_names", "results", "needs_more_fetch"]
   },
   {
     "class": "AppendRequestMessage",

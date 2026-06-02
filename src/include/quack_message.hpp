@@ -120,13 +120,16 @@ class PrepareRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_REQUEST;
 
-	PrepareRequestMessage(string connection_id_p, string sql_query_p)
-	    : QuackMessage(TYPE, std::move(connection_id_p)), sql_query(std::move(sql_query_p)) {
+	PrepareRequestMessage(string connection_id_p, string sql_query_p, hugeint_t query_id_p)
+	    : QuackMessage(TYPE, std::move(connection_id_p)), sql_query(std::move(sql_query_p)), query_id(query_id_p) {
 	}
 
 public:
 	const string &Query() const {
 		return sql_query;
+	}
+	hugeint_t QueryId() const {
+		return query_id;
 	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<PrepareRequestMessage> Deserialize(Deserializer &deserializer);
@@ -137,6 +140,7 @@ protected:
 
 private:
 	string sql_query;
+	hugeint_t query_id;
 };
 
 class PrepareResponseMessage : public QuackMessage {
@@ -144,10 +148,9 @@ public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
 
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p,
-	                       hugeint_t result_uuid)
+	                       vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
 	    : QuackMessage(TYPE), result_types(types_p), result_names(names_p), results(std::move(results_p)),
-	      needs_more_fetch(needs_more_fetch_p), result_uuid(result_uuid) {
+	      needs_more_fetch(needs_more_fetch_p) {
 	}
 
 public:
@@ -166,9 +169,6 @@ public:
 	bool NeedsMoreFetch() const {
 		return needs_more_fetch;
 	}
-	hugeint_t ResultUUID() const {
-		return result_uuid;
-	}
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<PrepareResponseMessage> Deserialize(Deserializer &deserializer);
@@ -182,7 +182,6 @@ private:
 	vector<string> result_names;
 	vector<unique_ptr<DataChunkWrapper>> results;
 	bool needs_more_fetch = false;
-	hugeint_t result_uuid;
 };
 
 // TODO this is where auth goes
@@ -257,8 +256,8 @@ class FetchRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::FETCH_REQUEST;
 
-	explicit FetchRequestMessage(string connection_id_p, hugeint_t uuid)
-	    : QuackMessage(TYPE, std::move(connection_id_p)), uuid(uuid) {
+	explicit FetchRequestMessage(string connection_id_p, hugeint_t query_id_p)
+	    : QuackMessage(TYPE, std::move(connection_id_p)), query_id(query_id_p) {
 	}
 
 protected:
@@ -269,7 +268,7 @@ public:
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<FetchRequestMessage> Deserialize(Deserializer &deserializer);
 
-	hugeint_t uuid;
+	hugeint_t query_id;
 };
 
 class FetchResponseMessage : public QuackMessage {

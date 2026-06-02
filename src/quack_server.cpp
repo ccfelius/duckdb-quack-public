@@ -303,8 +303,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		// Fresh query → restart batch numbering. Clients' local state is re-initialized on
 		// a new PREPARE, so indices start at 0 again.
 		connection.next_batch_index = 1;
-		// generate a random UUID to uniquely identify the result
-		connection.result_uuid = UUID::GenerateRandomUUID();
+		// use the client-provided query ID to identify this result
+		connection.current_query_id = prepare_request_message.QueryId();
 
 		Value max_chunks_val;
 		DBConfig::GetConfig(db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
@@ -322,8 +322,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>(std::move(error_message));
 		}
 		auto needs_more_fetch = results.size() == max_chunks_per_batch;
-		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch,
-		                                         connection.result_uuid);
+		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch);
 	}
 
 	case MessageType::FETCH_REQUEST: {
@@ -331,7 +330,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto &connection = *connection_p;
 		std::unique_lock<std::mutex> lock(connection.lock);
 
-		if (connection.result_uuid != fetch_request_message.uuid) {
+		if (connection.current_query_id != fetch_request_message.query_id) {
 			return make_uniq<ErrorResponse>("Result has been closed");
 		}
 		if (!connection.duckdb_query_result) {

@@ -1,4 +1,5 @@
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/types/uuid.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret.hpp"
@@ -71,8 +72,11 @@ unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(ClientCont
 	// get a client to query
 	auto client_wrapper = client_connection->GetClient(context);
 	auto &client = client_wrapper->GetClient();
-	auto response =
-	    client.Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
+	auto query_id = UUID::GenerateRandomUUID();
+	auto client_query_id = client_connection->GenerateClientQueryId();
+	auto prepare_msg = make_uniq<PrepareRequestMessage>(GetConnectionId(), query, query_id);
+	prepare_msg->SetClientQueryId(optional_idx(client_query_id));
+	auto response = client.Request<PrepareResponseMessage>(context, std::move(prepare_msg));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());

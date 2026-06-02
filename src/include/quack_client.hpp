@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "duckdb/common/http_util.hpp"
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
@@ -64,6 +66,8 @@ public:
 	unique_ptr<QuackClientWrapper> GetClient(ClientContext &context) const;
 	//! Return a client back to the cache
 	void StoreClient(unique_ptr<QuackClient> client_p) const;
+	//! Generate a monotonically increasing per-connection query ID for log correlation
+	uint32_t GenerateClientQueryId();
 
 private:
 	QuackUri uri;
@@ -71,6 +75,7 @@ private:
 	mutable mutex lock;
 	mutable vector<unique_ptr<QuackClient>> cached_clients;
 	idx_t max_connections_cached;
+	std::atomic<uint32_t> next_client_query_id {0};
 };
 
 struct QuackClientWrapper {

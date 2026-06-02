@@ -76,7 +76,6 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		auto request_type = request_message->Type();
 		string connection_id;
 		string query;
-		optional_idx client_query_id;
 		switch (request_type) {
 		case MessageType::PREPARE_REQUEST: {
 			auto &msg = request_message->Cast<PrepareRequestMessage>();
@@ -94,17 +93,7 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 			break;
 		}
 
-		// Inject client_query_id from context into the message before sending.
-		// Guard against reading the active query during transaction start itself
-		// (e.g. BEGIN TRANSACTION via QuackCatalog::ExecuteCommand), where the
-		// transaction isn't yet installed on the TransactionContext.
-		if (context && context->transaction.HasActiveTransaction()) {
-			auto raw_query_id = context->transaction.GetActiveQuery();
-			if (raw_query_id != DConstants::INVALID_INDEX) {
-				client_query_id = raw_query_id;
-				request_message->SetClientQueryId(client_query_id);
-			}
-		}
+		auto client_query_id = request_message->ClientQueryId();
 
 		// Log RPC message
 		auto &logger = context ? Logger::Get(*context) : Logger::Get(db);
@@ -152,6 +141,10 @@ QuackClientConnection::~QuackClientConnection() {
 		} catch (...) {
 		}
 	}
+}
+
+uint32_t QuackClientConnection::GenerateClientQueryId() {
+	return next_client_query_id.fetch_add(1, std::memory_order_relaxed);
 }
 
 shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &context, const QuackUri &uri,

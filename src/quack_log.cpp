@@ -9,10 +9,10 @@ QuackLogType::QuackLogType() : LogType(NAME, LEVEL, GetLogType()) {
 
 LogicalType QuackLogType::GetLogType() {
 	child_list_t<LogicalType> child_list = {
-	    {"message_type", LogicalType::VARCHAR},    {"quack_connection_id", LogicalType::VARCHAR},
-	    {"client_query_id", LogicalType::UBIGINT}, {"query", LogicalType::VARCHAR},
-	    {"server", LogicalType::VARCHAR},          {"duration_ms", LogicalType::BIGINT},
-	    {"response_type", LogicalType::VARCHAR},   {"error", LogicalType::VARCHAR},
+	    {"message_type", LogicalType::VARCHAR},     {"quack_connection_id", LogicalType::VARCHAR},
+	    {"client_query_id", LogicalType::UINTEGER}, {"query", LogicalType::VARCHAR},
+	    {"server", LogicalType::VARCHAR},           {"duration_ms", LogicalType::BIGINT},
+	    {"response_type", LogicalType::VARCHAR},    {"error", LogicalType::VARCHAR},
 	};
 	return LogicalType::STRUCT(child_list);
 }
@@ -23,7 +23,8 @@ string QuackLogType::ConstructLogMessage(MessageType request_type, const string 
 	child_list_t<Value> child_list = {
 	    {"message_type", Value(MessageTypeToString(request_type))},
 	    {"quack_connection_id", Value(connection_id)},
-	    {"client_query_id", client_query_id.IsValid() ? Value::UBIGINT(client_query_id.GetIndex()) : Value()},
+	    {"client_query_id",
+	     client_query_id.IsValid() ? Value::UINTEGER((uint32_t)client_query_id.GetIndex()) : Value()},
 	    {"query", query.empty() ? Value() : Value(query)},
 	    {"server", server_uri.empty() ? Value() : Value(server_uri)},
 	    {"duration_ms", Value::BIGINT(duration_ms)},

@@ -74,12 +74,12 @@ unique_ptr<ErrorResponse> ErrorResponse::Deserialize(Deserializer &deserializer)
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
-	serializer.WriteProperty<hugeint_t>(1, "uuid", uuid);
+	serializer.WriteProperty<hugeint_t>(1, "query_id", query_id);
 }
 
 unique_ptr<FetchRequestMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<FetchRequestMessage>(new FetchRequestMessage());
-	deserializer.ReadProperty<hugeint_t>(1, "uuid", result->uuid);
+	deserializer.ReadProperty<hugeint_t>(1, "query_id", result->query_id);
 	return result;
 }
 
@@ -111,11 +111,13 @@ MessageHeader MessageHeader::Deserialize(Deserializer &deserializer) {
 
 void PrepareRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(1, "sql_query", sql_query);
+	serializer.WriteProperty<hugeint_t>(2, "query_id", query_id);
 }
 
 unique_ptr<PrepareRequestMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<PrepareRequestMessage>(new PrepareRequestMessage());
 	deserializer.ReadPropertyWithDefault<string>(1, "sql_query", result->sql_query);
+	deserializer.ReadProperty<hugeint_t>(2, "query_id", result->query_id);
 	return result;
 }
 
@@ -124,7 +126,6 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<vector<string>>(2, "result_names", result_names);
 	serializer.WritePropertyWithDefault<bool>(3, "needs_more_fetch", needs_more_fetch);
 	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results", results);
-	serializer.WriteProperty<hugeint_t>(5, "result_uuid", result_uuid);
 }
 
 unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
@@ -132,9 +133,8 @@ unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deseriali
 	auto result_names = deserializer.ReadPropertyWithDefault<vector<string>>(2, "result_names");
 	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(3, "needs_more_fetch");
 	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results");
-	auto result_uuid = deserializer.ReadProperty<hugeint_t>(5, "result_uuid");
 	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(
-	    std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch, result_uuid));
+	    std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch));
 	return result;
 }
 
