@@ -13,6 +13,7 @@
 #include "storage/quack_optimizer.hpp"
 
 #include "include/storage/quack_catalog.hpp"
+#include "quack_activity.hpp"
 #include "quack_clear_cache.hpp"
 #include "quack_extension.hpp"
 #include "quack_log.hpp"
@@ -79,7 +80,7 @@ static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector
 }
 
 static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
-	result.SetValue(0, Value(true)); // choose life
+	result.SetValue(0, args.GetValue(1, 0)); // choose life
 }
 
 static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &) {
@@ -120,6 +121,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(QuackServerListFunction::GetFunction());
 	loader.RegisterFunction(QuackClearCacheFunction::GetFunction());
 	loader.RegisterFunction(GetQuackIdentifyFunction());
+	loader.RegisterFunction(QuacktivityFunction::GetFunction());
 
 	// the default authentication function
 	ScalarFunction quack_check_token("quack_check_token",
@@ -131,7 +133,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	ScalarFunction rpc_authorization("quack_nop_authorization",
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
-	                                 LogicalType::BOOLEAN, QuackDummyAuthorization);
+	                                 LogicalType::VARCHAR, QuackDummyAuthorization);
 	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
 

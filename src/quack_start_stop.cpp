@@ -16,6 +16,11 @@ struct QuackStartStopFunctionData : public TableFunctionData {
 
 static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<string> &names) {
+#ifdef __EMSCRIPTEN__
+	throw NotImplementedException("quack_serve is currently not implemented for the wasm platform, consider connecting "
+	                              "to already available endpoint");
+#endif
+
 	auto bind_data = make_uniq<QuackStartStopFunctionData>();
 	string listen_uri;
 	if (input.inputs.empty()) {

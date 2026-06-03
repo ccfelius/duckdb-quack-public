@@ -51,6 +51,18 @@ vector<QuackStorageExtensionInfo::ServerSnapshot> QuackStorageExtensionInfo::Lis
 	return result;
 }
 
+vector<QuackConnectionSnapshot> QuackStorageExtensionInfo::GetActiveConnectionSnaps() {
+	vector<QuackConnectionSnapshot> result;
+	std::lock_guard<std::mutex> lock(servers_mutex);
+	for (auto &[uri, server] : servers) {
+		for (auto &snapshot : server->GetActiveConnectionSnap()) {
+			snapshot.server_id = uri;
+			result.push_back(std::move(snapshot));
+		}
+	}
+	return result;
+}
+
 bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUri &listen_uri) {
 	unique_ptr<QuackServer> to_destroy;
 	{

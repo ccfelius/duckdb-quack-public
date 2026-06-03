@@ -51,6 +51,27 @@ select unnest(quack_uri_parser('quack:[::1]:1234', true));
 ----
 ::1	1234	true	true	https://[::1]:1234
 
+# hostnames containing the substring "quack" — must not be mangled by scheme stripping
+query IIIII
+select unnest(quack_uri_parser('quack://ilum-quack:9494', false));
+----
+ilum-quack	9494	false	false	http://ilum-quack:9494
+
+query IIIII
+select unnest(quack_uri_parser('quack:ilum-quack:9494', false));
+----
+ilum-quack	9494	false	false	http://ilum-quack:9494
+
+query IIIII
+select unnest(quack_uri_parser('quack://quack:9494', false));
+----
+quack	9494	false	false	http://quack:9494
+
+query IIIII
+select unnest(quack_uri_parser('quack://my-quack-host:9494', false));
+----
+my-quack-host	9494	false	false	http://my-quack-host:9494
+
 
 #failure cases
 

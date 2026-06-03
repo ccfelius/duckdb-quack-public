@@ -8,6 +8,9 @@
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/storage/database_size.hpp"
+#include "duckdb/parser/tableref/table_function_ref.hpp"
+#include "duckdb/parser/expression/constant_expression.hpp"
+#include "duckdb/parser/expression/function_expression.hpp"
 
 #include "storage/quack_catalog.hpp"
 #include "storage/quack_table.hpp"
@@ -130,12 +133,24 @@ DatabaseSize QuackCatalog::GetDatabaseSize(ClientContext &context) {
 	throw NotImplementedException("GetDatabaseSize not implemented yet");
 }
 
-//! Whether or not this is an in-memory SQLite database
+unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) {
+	return RemoteExecute(context, node->ToString());
+}
+
+unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, const string &sql) {
+	vector<unique_ptr<ParsedExpression>> args;
+	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
+	args.push_back(make_uniq<ConstantExpression>(Value(sql)));
+	auto func_ref = make_uniq<TableFunctionRef>();
+	func_ref->function = make_uniq<FunctionExpression>("quack_query_by_name", std::move(args));
+	return func_ref;
+}
+
 bool QuackCatalog::InMemory() {
-	throw NotImplementedException("InMemory not implemented yet");
+	return false;
 }
 string QuackCatalog::GetDBPath() {
-	throw NotImplementedException("GetDBPath not implemented yet");
+	return client_connection->ServerURI().Uri();
 }
 
 void QuackCatalog::DropSchema(ClientContext &context, DropInfo &info) {

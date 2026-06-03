@@ -5,6 +5,9 @@
 include test/template/quack_setup.test_template
 
 statement ok
+PRAGMA disable_optimizer
+
+statement ok
 create secret (type quack, token 'asdf')
 
 statement ok

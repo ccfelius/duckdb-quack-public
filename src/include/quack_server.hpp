@@ -20,6 +20,8 @@ class DatabaseInstance;
 class PreparedStatement;
 class EncryptionState;
 
+enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED };
+
 struct QuackConnection {
 	explicit QuackConnection(string session_id_p);
 	~QuackConnection();
@@ -32,6 +34,17 @@ struct QuackConnection {
 	//! Client-provided query ID for the current in-flight query
 	hugeint_t current_query_id;
 	string session_id;
+	string sql_query;
+	QuackQueryState query_state = QuackQueryState::IDLE;
+	timestamp_t query_started_at {0};
+};
+
+struct QuackConnectionSnapshot {
+	string server_id;
+	string session_id;
+	string sql_query;
+	QuackQueryState query_state = QuackQueryState::IDLE;
+	timestamp_t query_started_at {0};
 };
 
 enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
@@ -67,6 +80,8 @@ public:
 
 	//! Throw InvalidInputException if `token` doesn't meet requirements(currently, length >= 4)
 	static void ValidateToken(const string &token);
+
+	vector<QuackConnectionSnapshot> GetActiveConnectionSnap();
 
 	const string &Token() {
 		return token;

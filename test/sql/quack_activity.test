@@ -1,0 +1,82 @@
+# name: test/sql/quack_activity.test
+# description: test quacktivity function for the quack extension
+# group: [sql]
+
+require quack
+
+require httpfs
+
+set ignore_error_messages __none__
+
+statement ok
+create table fuu as values(42, 43);
+
+foreach server 'quack:localhost'
+
+statement ok con1
+call quack_serve({server}, token='asdf');
+
+# no connections yet
+query I con1
+select count(*) from quack_activity();
+----
+0
+
+# attach creates a persistent QuackClientConnection
+statement ok con2
+attach {server} as rpc2 (token 'asdf');
+
+query I con1
+select state from quack_activity();
+----
+finished
+
+loop i 0 3
+
+query II con2
+from rpc2.fuu;
+----
+42	43
+
+query I con1
+select count(*) from quack_activity();
+----
+1
+
+query I con1
+select starts_with(query, 'SELECT') from quack_activity();
+----
+true
+
+endloop
+
+# two clients on the same server
+statement ok con1
+attach {server} as rpc3 (token 'asdf');
+
+query I con1
+select count(*) from quack_activity();
+----
+2
+
+statement ok con1
+detach rpc3;
+
+query I con1
+select count(*) from quack_activity();
+----
+1
+
+# detach removes the session
+statement ok con2
+detach rpc2;
+
+query I con1
+select count(*) from quack_activity();
+----
+0
+
+statement ok con1
+call quack_stop({server});
+
+endloop

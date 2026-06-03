@@ -30,10 +30,10 @@ select count(j) from rpc.main.t2;
 # Two RPC tables in the same query: both call LookupEntry on the same
 # connection_id during planning. The second PREPARE overwrites the first's
 # server-side query result, so the first table's scan fetches 0 rows.
-statement error
+query II
 select count(t1.i), count(t2.j) from rpc.main.t1, rpc.main.t2;
 ----
-not currently supported
+20000	20000
 
 statement ok
 detach rpc;

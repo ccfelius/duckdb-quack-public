@@ -35,6 +35,20 @@ QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const 
 QuackServer::~QuackServer() {
 }
 
+vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
+	vector<QuackConnectionSnapshot> result;
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	for (auto &[id, conn] : active_connections) {
+		QuackConnectionSnapshot snapshot;
+		snapshot.session_id = conn->session_id;
+		snapshot.sql_query = conn->sql_query;
+		snapshot.query_state = conn->query_state;
+		snapshot.query_started_at = conn->query_started_at;
+		result.push_back(std::move(snapshot));
+	}
+	return result;
+}
+
 shared_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 	auto it = active_connections.find(connection_id);
@@ -86,17 +100,17 @@ static string GetSettingString(DatabaseInstance &db, const string &setting_name)
 }
 
 template <typename... ARGS>
-static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... values) {
+static Value EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... values) {
 	Connection dummy_connection(db);
 	auto auth_result = dummy_connection.Query(sql, values...);
 	if (!auth_result || auth_result->HasError()) {
-		return false;
+		return Value(false);
 	}
 	auto auth_result_chunk = auth_result->Fetch();
-	if (!auth_result_chunk || !auth_result_chunk->GetValue(0, 0).template GetValue<bool>()) {
-		return false;
+	if (!auth_result_chunk || auth_result_chunk->size() == 0) {
+		return Value(false);
 	}
-	return true;
+	return auth_result_chunk->GetValue(0, 0);
 }
 
 static constexpr idx_t kTokenBytes = 16; // 128 bits
@@ -261,9 +275,12 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>("Unsupported Quack version - server only supports version 1 of quack");
 		}
 		string session_id = GenerateSessionId();
-		if (!EvaluateAuthQuery(
-		        db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
-		        Value(session_id), Value(connection_request_message.AuthString()), Value(Token()))) {
+		auto auth_result = EvaluateAuthQuery(
+		    db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
+		    Value(session_id), Value(connection_request_message.AuthString()), Value(Token()));
+
+		if (auth_result.IsNull() ||
+		    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
 			return make_uniq<ErrorResponse>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
@@ -280,21 +297,33 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto &connection = *connection_p;
 
 		// TODO do not do this if there is no fun set
-		if (!EvaluateAuthQuery(
-		        db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
-		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {
+		auto auth_result = EvaluateAuthQuery(
+		    db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
+		    Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()));
+		if (auth_result.IsNull() ||
+		    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
 			return make_uniq<ErrorResponse>("Authorization failed");
 		}
+		auto effective_sql = (auth_result.type().id() == LogicalTypeId::VARCHAR) ? auth_result.GetValue<string>()
+		                                                                         : prepare_request_message.Query();
 
 		std::unique_lock<std::mutex> lock(connection.lock);
 		connection.duckdb_query_result.reset();
+		connection.sql_query = prepare_request_message.Query();
+		connection.query_state = QuackQueryState::ACTIVE;
+		connection.query_started_at = Timestamp::GetCurrentTimestamp();
 
 		{
-			auto query_result = connection.duckdb_connection->SendQuery(prepare_request_message.Query());
+			auto query_result = connection.duckdb_connection->SendQuery(effective_sql);
 			if (query_result->HasError()) {
+				// TODO; instead of cancelled, add an ERROR state
+				connection.query_state = QuackQueryState::CANCELLED;
+				connection.sql_query = "";
 				return make_uniq<ErrorResponse>(query_result->GetErrorObject());
 			}
 			if (query_result->names.empty()) {
+				connection.query_state = QuackQueryState::CANCELLED;
+				connection.sql_query = "";
 				return make_uniq<ErrorResponse>("Query did not return any columns");
 			}
 
@@ -322,6 +351,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>(std::move(error_message));
 		}
 		auto needs_more_fetch = results.size() == max_chunks_per_batch;
+		if (!needs_more_fetch) {
+			connection.query_state = QuackQueryState::FINISHED;
+		}
 		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch);
 	}
 
@@ -352,6 +384,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>(std::move(error_message));
 		}
 		auto assigned_batch_index = connection.next_batch_index++;
+		if (results.size() < max_chunks_per_batch) {
+			connection.query_state = QuackQueryState::FINISHED;
+		}
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
 
@@ -366,10 +401,14 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		                       SQLIdentifier(append_request_message.TableName()));
 
 		// TODO do not do this if there is no fun set
-		if (!EvaluateAuthQuery(
-		        db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
-		        Value(append_request_message.ConnectionId()), Value(dummy_insert_query))) {
-			return make_uniq<ErrorResponse>("Authorization failed");
+		{
+			auto auth_result = EvaluateAuthQuery(
+			    db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
+			    Value(append_request_message.ConnectionId()), Value(dummy_insert_query));
+			if (auth_result.IsNull() ||
+			    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
+				return make_uniq<ErrorResponse>("Authorization failed");
+			}
 		}
 
 		std::unique_lock<std::mutex> lock(connection.lock);

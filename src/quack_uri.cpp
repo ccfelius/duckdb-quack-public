@@ -13,15 +13,17 @@ QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(std::move(uri_p))
 	ipv6 = false;
 	port = 9494;
 	StringUtil::Trim(uri);
-	// first off, lets be tolerant and accept this variant, too
+	// strip the scheme as a prefix only — must not use StringUtil::Replace here,
+	// which replaces every occurrence and would mangle hostnames containing "quack:"
+	// (e.g. quack://ilum-quack:9494)
+	string remainder;
 	if (StringUtil::StartsWith(uri, "quack://")) {
-		uri = StringUtil::Replace(uri, "quack://", "quack:");
-	}
-	if (!StringUtil::StartsWith(uri, "quack:")) {
+		remainder = uri.substr(strlen("quack://"));
+	} else if (StringUtil::StartsWith(uri, "quack:")) {
+		remainder = uri.substr(strlen("quack:"));
+	} else {
 		throw InvalidInputException("Invalid DuckDB Quack RPC URI, needs to start with 'quack:'");
 	}
-
-	auto remainder = StringUtil::Replace(uri, "quack:", "");
 	if (remainder.empty()) {
 		throw InvalidInputException("Missing hostname");
 	}

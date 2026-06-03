@@ -2,6 +2,8 @@
 # description: quack_serve URI keying is canonical (quack:host:port), so equivalent forms collide.
 # group: [sql]
 
+require notwindows
+
 require quack
 
 require httpfs

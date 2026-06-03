@@ -27,6 +27,7 @@ struct QuackScanBindData : FunctionData {
 	vector<LogicalType> column_types;
 	vector<unique_ptr<DataChunkWrapper>> results;
 	shared_ptr<QuackClientConnection> client_connection;
+	optional_ptr<TableCatalogEntry> table_entry;
 	bool needs_more_fetch = true;
 	hugeint_t query_id;
 	optional_idx client_query_id;

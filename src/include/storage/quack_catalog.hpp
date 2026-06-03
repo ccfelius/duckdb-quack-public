@@ -54,6 +54,19 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
+	bool Supports(RemoteCapability capability) const override {
+		switch (capability) {
+		case RemoteCapability::IS_REMOTE:
+		case RemoteCapability::EXECUTE_QUERY_NODE:
+		case RemoteCapability::CONNECT:
+			return true;
+		default:
+			return false;
+		}
+	}
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
+
 	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(ClientContext &context, const string &query);
 	const QuackUri &GetServerUri();
 	const string &GetConnectionId();

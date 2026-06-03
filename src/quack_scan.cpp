@@ -385,6 +385,14 @@ unique_ptr<FunctionData> QuackScanDeserialize(Deserializer &deserializer, TableF
 	throw NotImplementedException("Quack scans cannot be deserialized (yet?)");
 }
 
+BindInfo QuackScanGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
+	auto &bind_data = bind_data_p->CastNoConst<QuackScanBindData>();
+	if (bind_data.table_entry) {
+		return BindInfo(*bind_data.table_entry);
+	}
+	return BindInfo(ScanType::EXTERNAL);
+}
+
 TableFunction QuackScanFunction::GetFunction() {
 	auto fun = TableFunction("quack_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
 	                         QuackScanInitGlobal, QuackScanInitLocal);
@@ -396,6 +404,7 @@ TableFunction QuackScanFunction::GetFunction() {
 	fun.to_string = QuackScanToString;
 	fun.serialize = QuackScanSerialize;
 	fun.deserialize = QuackScanDeserialize;
+	fun.get_bind_info = QuackScanGetBindInfo;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
@@ -409,6 +418,7 @@ TableFunction QuackScanByNameFunction::GetFunction() {
 	fun.to_string = QuackScanToString;
 	fun.serialize = QuackScanSerialize;
 	fun.deserialize = QuackScanDeserialize;
+	fun.get_bind_info = QuackScanGetBindInfo;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
