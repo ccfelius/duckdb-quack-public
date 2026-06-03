@@ -31,8 +31,8 @@ struct QuackConnection {
 	unique_ptr<QueryResult> duckdb_query_result;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 1;
-	//! Current result UUID
-	hugeint_t result_uuid;
+	//! Current query UUID
+	hugeint_t query_uuid;
 	string session_id;
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
@@ -97,6 +97,7 @@ public:
 	}
 
 protected:
+	bool CancelConnection(const string &connection_id);
 	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);
 	unique_ptr<QuackMessage> HandleMessageInternal(DatabaseInstance &db, QuackMessage &received_message,
 	                                               optional_ptr<QuackConnection> connection);

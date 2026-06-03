@@ -124,7 +124,7 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<vector<string>>(2, "result_names", result_names);
 	serializer.WritePropertyWithDefault<bool>(3, "needs_more_fetch", needs_more_fetch);
 	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results", results);
-	serializer.WriteProperty<hugeint_t>(5, "result_uuid", result_uuid);
+	serializer.WriteProperty<hugeint_t>(5, "query_uuid", query_uuid);
 }
 
 unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
@@ -132,9 +132,9 @@ unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deseriali
 	auto result_names = deserializer.ReadPropertyWithDefault<vector<string>>(2, "result_names");
 	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(3, "needs_more_fetch");
 	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results");
-	auto result_uuid = deserializer.ReadProperty<hugeint_t>(5, "result_uuid");
+	auto query_uuid = deserializer.ReadProperty<hugeint_t>(5, "query_uuid");
 	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(
-	    std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch, result_uuid));
+	    std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch, query_uuid));
 	return result;
 }
 
@@ -143,6 +143,17 @@ void SuccessResponse::Serialize(Serializer &serializer) const {
 
 unique_ptr<SuccessResponse> SuccessResponse::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<SuccessResponse>(new SuccessResponse());
+	return result;
+}
+
+
+void CancelRequestMessage::Serialize(Serializer &serializer) const {
+	serializer.WriteProperty<hugeint_t>(1, "query_uuid", query_uuid);
+}
+
+unique_ptr<CancelRequestMessage> CancelRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<CancelRequestMessage>(new CancelRequestMessage());
+	deserializer.ReadProperty<hugeint_t>(1, "query_uuid", result->query_uuid);
 	return result;
 }
 

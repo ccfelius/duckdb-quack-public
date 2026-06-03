@@ -169,6 +169,7 @@ bool ServerSupportsMessage(MessageType type) {
 	case MessageType::FETCH_REQUEST:
 	case MessageType::APPEND_REQUEST:
 	case MessageType::DISCONNECT_MESSAGE:
+	case MessageType::CANCEL_REQUEST:
 		return true;
 	default:
 		return false;
@@ -243,6 +244,16 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	}
 
 	return response;
+}
+
+bool QuackServer::CancelConnection(const string &connection_id) {
+	auto connection = GetConnection(connection_id);
+	if (!connection) {
+		return false;
+	}
+	connection->duckdb_connection->Interrupt();
+	connection->query_state = QuackQueryState::CANCELLED;
+	return true;
 }
 
 static vector<unique_ptr<DataChunkWrapper>> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
@@ -333,7 +344,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		// a new PREPARE, so indices start at 0 again.
 		connection.next_batch_index = 1;
 		// generate a random UUID to uniquely identify the result
-		connection.result_uuid = UUID::GenerateRandomUUID();
+		connection.query_uuid = UUID::GenerateRandomUUID();
 
 		Value max_chunks_val;
 		DBConfig::GetConfig(db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
@@ -355,7 +366,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			connection.query_state = QuackQueryState::FINISHED;
 		}
 		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch,
-		                                         connection.result_uuid);
+		                                         connection.query_uuid);
 	}
 
 	case MessageType::FETCH_REQUEST: {
@@ -363,7 +374,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto &connection = *connection_p;
 		std::unique_lock<std::mutex> lock(connection.lock);
 
-		if (connection.result_uuid != fetch_request_message.uuid) {
+		if (connection.query_uuid != fetch_request_message.uuid) {
 			return make_uniq<ErrorResponse>("Result has been closed");
 		}
 		if (!connection.duckdb_query_result) {
@@ -428,6 +439,15 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			// apend failed - directly pass error to user
 			return make_uniq<ErrorResponse>(ErrorData(ex));
 		}
+		return make_uniq<SuccessResponse>();
+	}
+	case MessageType::CANCEL_REQUEST: {
+		auto &cancel_request_message = received_message.Cast<CancelRequestMessage>();
+		auto &connection = *connection_p;
+		// TODO; we should check the query id in the future
+		// to not cancel a newer query running on this connection
+		connection.duckdb_connection->Interrupt();
+		connection.query_state = QuackQueryState::CANCELLED;
 		return make_uniq<SuccessResponse>();
 	}
 	default: {

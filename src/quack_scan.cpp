@@ -55,7 +55,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->result_uuid = bind_response->ResultUUID();
+	bind_data->query_uuid = bind_response->QueryUUID();
 
 	return bind_data;
 }
@@ -96,7 +96,7 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	// new stuff
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->result_uuid = bind_response->ResultUUID();
+	bind_data->query_uuid = bind_response->QueryUUID();
 	return bind_data;
 }
 
@@ -139,9 +139,9 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
 	explicit QuackScanGlobalState(vector<ColumnIndex> column_ids_p, vector<idx_t> projection_id_p,
-	                              vector<ChunkResult> results_p, bool needs_more_fetch_p, hugeint_t result_uuid_p)
+	                              vector<ChunkResult> results_p, bool needs_more_fetch_p, hugeint_t query_uuid_p)
 	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(std::move(column_ids_p)),
-	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p), result_uuid(result_uuid_p),
+	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p), query_uuid(query_uuid_p),
 	      results(std::move(results_p)) {
 	}
 	idx_t MaxThreads() const override {
@@ -151,7 +151,7 @@ struct QuackScanGlobalState : GlobalTableFunctionState {
 	vector<ColumnIndex> column_ids;
 	vector<idx_t> projection_ids;
 	atomic<bool> needs_more_fetch;
-	hugeint_t result_uuid;
+	hugeint_t query_uuid;
 
 	vector<ChunkResult> TryGetResults() {
 		lock_guard<mutex> guard(lock);
@@ -241,7 +241,7 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	// We execute the query here, right before scanning, so the result is fresh.
 	vector<ChunkResult> results;
 	bool needs_more_fetch = bind_data.needs_more_fetch;
-	hugeint_t result_uuid;
+	hugeint_t query_uuid;
 	if (!bind_data.table_name.empty()) {
 		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
@@ -256,17 +256,17 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 		}
-		result_uuid = response_message->ResultUUID();
+		query_uuid = response_message->QueryUUID();
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::REQUIRES_PUSHDOWN);
 		}
-		result_uuid = bind_data.result_uuid;
+		query_uuid = bind_data.query_uuid;
 	}
 	// we only multithread if there is more to fetch
 	return make_uniq<QuackScanGlobalState>(input.column_indexes, input.projection_ids, std::move(results),
-	                                       needs_more_fetch, result_uuid);
+	                                       needs_more_fetch, query_uuid);
 }
 
 unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
@@ -321,7 +321,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 			auto &client = local_state.client_wrapper->GetClient();
 			auto fetch_response = client.Request<FetchResponseMessage>(
 			    context,
-			    make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId(), global_state.result_uuid));
+			    make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId(), global_state.query_uuid));
 
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done
@@ -407,6 +407,24 @@ TableFunction QuackScanByNameFunction::GetFunction() {
 
 bool QuackCatalog::IsQuackScan(const string &name) {
 	return name == "quack_query" || name == "quack_query_by_name";
+}
+
+QuackCatalog &QuackCatalog::GetQuackCatalog(ClientContext &context, Value &catalog_name) {
+	if (catalog_name.IsNull()) {
+		throw BinderException("Catalog cannot be NULL");
+	}
+	// look up the database to query
+	auto db_name = catalog_name.GetValue<string>();
+	auto &db_manager = DatabaseManager::Get(context);
+	auto db = db_manager.GetDatabase(context, db_name);
+	if (!db) {
+		throw BinderException("Failed to find attached database \"%s\"", db_name);
+	}
+	auto &catalog = db->GetCatalog();
+	if (catalog.GetCatalogType() != "quack") {
+		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
+	}
+	return catalog.Cast<QuackCatalog>();
 }
 
 } // namespace duckdb

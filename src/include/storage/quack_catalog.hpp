@@ -28,6 +28,7 @@ public:
 	string GetCatalogType() override {
 		return "quack";
 	}
+	static QuackCatalog &GetQuackCatalog(ClientContext &context, Value &catalog_name);
 	static bool IsQuackScan(const string &name);
 	void Initialize(bool load_builtin) override;
 
