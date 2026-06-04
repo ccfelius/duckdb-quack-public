@@ -47,15 +47,15 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	auto client_wrapper = client_connection.GetClient(context);
 	auto &client = client_wrapper->GetClient();
 
+	bind_data->query_uuid = UUID::GenerateRandomUUID();
 	auto bind_response = client.Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
+	    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query, bind_data->query_uuid));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->query_uuid = bind_response->QueryUUID();
 
 	return bind_data;
 }
@@ -87,8 +87,10 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	bind_data->client_connection = catalog.GetClientConnection();
 	auto client_wrapper = bind_data->client_connection->GetClient(context);
 	auto &client = client_wrapper->GetClient();
+	bind_data->query_uuid = UUID::GenerateRandomUUID();
 	auto bind_response = client.Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query));
+	    context,
+	    make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query, bind_data->query_uuid));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -96,7 +98,6 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	// new stuff
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	bind_data->query_uuid = bind_response->QueryUUID();
 	return bind_data;
 }
 
@@ -248,15 +249,15 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 		auto &client_connection = *bind_data.client_connection;
 		auto client_wrapper = client_connection.GetClient(context);
 		auto &client = client_wrapper->GetClient();
+		query_uuid = UUID::GenerateRandomUUID();
 		auto response_message = client.Request<PrepareResponseMessage>(
-		    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
+		    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query, query_uuid));
 		needs_more_fetch = response_message->NeedsMoreFetch();
 		// fetch the result
 		for (auto &chunk_ref : response_message->MutableResults()) {
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 		}
-		query_uuid = response_message->QueryUUID();
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();

@@ -341,8 +341,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		// Fresh query → restart batch numbering. Clients' local state is re-initialized on
 		// a new PREPARE, so indices start at 0 again.
 		connection.next_batch_index = 1;
-		// generate a random UUID to uniquely identify the result
-		connection.query_uuid = UUID::GenerateRandomUUID();
+		connection.query_uuid = prepare_request_message.QueryUUID();
 
 		Value max_chunks_val;
 		DBConfig::GetConfig(db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
@@ -374,6 +373,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 
 		if (connection.query_uuid != fetch_request_message.uuid) {
 			return make_uniq<ErrorResponse>("Result has been closed");
+		}
+		if (connection.query_state == QuackQueryState::CANCELLED) {
+			return make_uniq<ErrorResponse>("Query was interrupted");
 		}
 		if (!connection.duckdb_query_result) {
 			return make_uniq<FetchResponseMessage>();
