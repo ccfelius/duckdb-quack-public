@@ -21,7 +21,7 @@ ATTACH 'quack:localhost' AS remote (TYPE quack, TOKEN 'asdf');
 # sleep for a while
 onlyif threadid=0
 statement error
-quack_query_by_name('remote', 'SELECT sleep_ms(50000)');
+FROM quack_query_by_name('remote', 'SELECT sleep_ms(5000)');
 ----
 Interrupt
 

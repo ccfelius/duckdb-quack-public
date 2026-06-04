@@ -130,6 +130,8 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 		return SuccessResponse::Deserialize(deserializer);
 	case MessageType::DISCONNECT_MESSAGE:
 		return DisconnectMessage::Deserialize(deserializer);
+	case MessageType::CANCEL_REQUEST:
+		return CancelRequestMessage::Deserialize(deserializer);
 	case MessageType::ERROR_RESPONSE:
 		return ErrorResponse::Deserialize(deserializer);
 	default:
