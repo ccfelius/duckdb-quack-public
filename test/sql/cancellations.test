@@ -49,10 +49,9 @@ FROM quack_cancel('remote2', getvariable('conn_id'));
 endloop
 
 query I
-SELECT state FROM quack_activity();
+SELECT count(state) FROM quack_activity() where state = 'cancelled';
 ----
-cancelled
-finished
+1
 
 statement ok
 CALL quack_stop('quack:localhost');

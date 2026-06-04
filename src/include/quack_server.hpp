@@ -97,7 +97,6 @@ public:
 	}
 
 protected:
-	bool CancelConnection(const string &connection_id);
 	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);
 	unique_ptr<QuackMessage> HandleMessageInternal(DatabaseInstance &db, QuackMessage &received_message,
 	                                               optional_ptr<QuackConnection> connection);

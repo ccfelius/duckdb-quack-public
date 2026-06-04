@@ -251,17 +251,6 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	return response;
 }
 
-bool QuackServer::CancelConnection(const string &connection_id) {
-	auto connection = GetConnection(connection_id);
-	if (!connection) {
-		return false;
-	}
-	connection->duckdb_connection->Interrupt();
-	connection->duckdb_query_result.reset();
-	connection->query_state = QuackQueryState::CANCELLED;
-	return true;
-}
-
 static vector<unique_ptr<DataChunkWrapper>> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
                                                         idx_t max_chunks) {
 	vector<unique_ptr<DataChunkWrapper>> results;
@@ -304,11 +293,6 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	}
 	case MessageType::DISCONNECT_MESSAGE: {
 		auto &connection = *connection_p;
-		if (connection.query_state == QuackQueryState::ACTIVE) {
-			connection.duckdb_connection->Interrupt();
-			connection.duckdb_query_result.reset();
-			connection.query_state = QuackQueryState::CANCELLED;
-		}
 		if (!DisconnectConnection(connection.session_id)) {
 			return make_uniq<ErrorResponse>("Connection does not exist / already disconnected");
 		}
@@ -338,18 +322,17 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		{
 			auto query_result = connection.duckdb_connection->SendQuery(effective_sql);
 			if (query_result->HasError()) {
-				// TODO; instead of cancelled, add an ERROR state
-				connection.query_state = QuackQueryState::ERROR;
 				connection.sql_query = "";
 				auto response = make_uniq<ErrorResponse>(query_result->GetErrorObject());
 				connection.duckdb_query_result.reset();
+				connection.query_state = QuackQueryState::CANCELLED;
 				return response;
 			}
 			if (query_result->names.empty()) {
-				connection.query_state = QuackQueryState::ERROR;
 				connection.sql_query = "";
 				auto response = make_uniq<ErrorResponse>(query_result->GetErrorObject());
 				connection.duckdb_query_result.reset();
+				connection.query_state = QuackQueryState::ERROR;
 				return make_uniq<ErrorResponse>("Query did not return any columns");
 			}
 
@@ -461,10 +444,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto &connection = *connection_p;
 		// TODO; we should check the query id in the future
 		// to not cancel a newer query running on this connection
-		// Interrupt outside the lock so the running query unblocks and releases the lock.
 		connection.duckdb_connection->Interrupt();
-		// Then acquire the lock to safely update state and free the buffered result.
-		std::unique_lock<std::mutex> lock(connection.lock);
 		connection.query_state = QuackQueryState::CANCELLED;
 		connection.duckdb_query_result.reset();
 		return make_uniq<SuccessResponse>();
