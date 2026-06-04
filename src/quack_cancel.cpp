@@ -30,7 +30,6 @@ struct QuackCancelBindData : FunctionData {
 	}
 };
 
-// new input: catalog, conn_id
 static unique_ptr<FunctionData> QuackCancelBind(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -39,7 +38,6 @@ static unique_ptr<FunctionData> QuackCancelBind(ClientContext &context, TableFun
 
 	auto target_connection_id = input.inputs[1].GetValue<string>();
 
-	// TODO; can be ommitted
 	return_types = {LogicalType::VARCHAR, LogicalType::BOOLEAN};
 	names = {"connection_id", "cancelled"};
 

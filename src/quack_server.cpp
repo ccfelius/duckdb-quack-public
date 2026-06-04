@@ -20,10 +20,6 @@ QuackConnection::QuackConnection(string session_id_p) : session_id(std::move(ses
 
 QuackConnection::~QuackConnection() {
 	duckdb_query_result.reset();
-	// connection is destroyed while query is still active
-	if (query_state == QuackQueryState::ACTIVE) {
-		query_state = QuackQueryState::CANCELLED;
-	}
 }
 
 void QuackServer::ValidateToken(const string &token) {
