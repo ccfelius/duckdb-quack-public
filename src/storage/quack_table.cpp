@@ -84,6 +84,7 @@ TableFunction QuackTableCatalogEntry::GetScanFunction(ClientContext &context, un
 		bind_data->column_names.push_back(col.Name());
 		bind_data->column_types.push_back(col.Type());
 	}
+	bind_data->table_entry = this;
 	bind_data_p = std::move(bind_data);
 	return QuackScanFunction::GetFunction();
 }

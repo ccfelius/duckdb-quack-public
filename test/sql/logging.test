@@ -2,84 +2,78 @@
 # description: test RPC and HTTP logging
 # group: [sql]
 
-require quack
+include test/template/quack_setup.test_template
 
-require httpfs
-
-set ignore_error_messages __none__
-
-
-statement ok con1
-call quack_serve('quack:localhost', token='asdf');
-
-sleep 100 millisecond
-
-
-statement ok con2
+statement ok
 create secret (type quack, token 'asdf')
 
 
 # --- RPC logging ---
 
-statement ok con2
+# enable client-side logging
+statement ok
+CALL enable_logging('Quack');
+
+# enable server-side logging
+statement ok quack_db:quack_server_con
 CALL enable_logging('Quack');
 
 # quack_query should produce RPC log entries
-query I con2
-from quack_query('quack:localhost', 'select 42 as answer')
+query I
+from quack_query({server}, 'select 42 as answer')
 ----
 42
 
 # check that we have RPC logs with correct structure
-query I con2
+query I
 select count(*) > 0 from duckdb_logs where type = 'Quack'
 ----
 true
 
 # check that PREPARE_REQUEST has the query
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where message_type = 'PREPARE_REQUEST' and query = 'select 42 as answer'
 ----
 true
 
 # we no longer need a fetch
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where message_type = 'FETCH_REQUEST'
 ----
 false
 
 # check that rpc_connection_id is set on non-connection messages
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where message_type = 'PREPARE_REQUEST' and quack_connection_id != ''
 ----
 true
 
 # check duration_ms is non-negative
-query I con2
+query I
 select count(*) = 0 from duckdb_logs_parsed('Quack') where duration_ms < 0
 ----
 true
 
 # check server field is populated on client-side logs
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where server is not null and server != ''
 ----
 true
 
 # check response_type is populated
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where response_type = 'PREPARE_RESPONSE'
 ----
 true
 
 # check error field for successful queries is NULL
-query I con2
+query I
 select count(*) = 0 from duckdb_logs_parsed('Quack') where error is not null and server is not null
 ----
 true
 
 # check client_query_id is populated on client-side logs
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is not null and server is not null
 ----
 true
@@ -87,7 +81,7 @@ true
 mode skip
 
 # check client_query_id is populated on server-side logs
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is not null and (server is null or server = '')
 ----
 true
@@ -95,62 +89,61 @@ true
 mode unskip
 
 # check server-side logs exist (scope=DATABASE, no server field)
-query I con2
+query I quack_db:quack_server_con
 select count(*) > 0 from duckdb_logs_parsed('Quack') where server is null or server = ''
 ----
 true
 
 # clear logs and test error logging
-statement ok con2
+statement ok
 CALL truncate_duckdb_logs();
 
-statement error con2
-from quack_query('quack:localhost', 'selexxxct 42')
+statement error
+from quack_query({server}, 'selexxxct 42')
 ----
 Error
 
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('Quack') where response_type = 'ERROR_RESPONSE' and error is not null
 ----
 true
 
 # --- HTTP logging ---
 
-statement ok con2
+statement ok
 CALL truncate_duckdb_logs();
 
-statement ok con2
+statement ok
 CALL disable_logging();
 
-statement ok con2
+statement ok
 CALL enable_logging('HTTP');
 
-query I con2
-from quack_query('quack:localhost', 'select 1')
+query I
+from quack_query({server}, 'select 1')
 ----
 1
 
 # check HTTP logs exist with POST method
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.type = 'POST'
 ----
 true
 
 # check HTTP response status
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = 'OK_200'
 ----
 true
 
 # check URL contains /quack
-query I con2
+query I
 select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.url like '%/quack'
 ----
 true
 
 # clean up
-statement ok con2
+statement ok
 CALL disable_logging();
 
-statement ok con1
-call quack_stop('quack:localhost');
+include test/template/quack_teardown.test_template

@@ -1,0 +1,70 @@
+# name: test/sql/quack_activity.test
+# description: test quacktivity function for the quack extension
+# group: [sql]
+
+include test/template/quack_setup.test_template
+
+statement ok quack_db:quack_server_con
+create table fuu as values(42, 43);
+
+# no connections yet
+query I
+select count(*) from quack_activity();
+----
+0
+
+# attach creates a persistent QuackClientConnection
+statement ok
+attach {server} as rpc2 (token 'asdf');
+
+query I quack_db:quack_server_con
+select state from quack_activity();
+----
+finished
+
+loop i 0 3
+
+query II
+from quack_query_by_name('rpc2', 'SELECT * FROM fuu');
+----
+42	43
+
+query I quack_db:quack_server_con
+select count(*) from quack_activity();
+----
+1
+
+query I quack_db:quack_server_con
+select starts_with(query, 'SELECT') from quack_activity();
+----
+true
+
+endloop
+
+# two clients on the same server
+statement ok
+attach {server} as rpc3 (token 'asdf');
+
+query I quack_db:quack_server_con
+select count(*) from quack_activity();
+----
+2
+
+statement ok
+detach rpc3;
+
+query I quack_db:quack_server_con
+select count(*) from quack_activity();
+----
+1
+
+# detach removes the session
+statement ok
+detach rpc2;
+
+query I quack_db:quack_server_con
+select count(*) from quack_activity();
+----
+0
+
+include test/template/quack_teardown.test_template

@@ -11,10 +11,15 @@ namespace duckdb {
 void HttpQuackServer::StopAccepting() {
 	// Closes the listening socket only. Idempotent. Safe to call from a
 	// request-handler thread.
-	if (is_running) {
+	lock_guard<mutex> guard(state_lock);
+	if (server_state == QuackServerState::RUNNING) {
+		// server is running - stop it and decommission
+		server->wait_until_ready();
 		server->stop();
-		is_running = false;
+		server->decommission();
 	}
+	// close the server
+	server_state = QuackServerState::CLOSED;
 }
 
 void HttpQuackServer::Close() {
@@ -37,18 +42,22 @@ HttpQuackServer::~HttpQuackServer() {
 	}
 }
 
-void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
+void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, uint16_t listen_port) {
 	D_ASSERT(server->server);
-	// Ports 1 and 65535 are both valid — the privileged-port rule is a bind()
-	// policy, not a range limit (and does not apply on every platform).
-	D_ASSERT(listen_port >= 1 && listen_port <= 65535);
 	// Socket is already bound (synchronously, in the constructor).
 	// Catch everything so the listener thread never lets an exception escape — that
 	// would call std::terminate and abort the host process.
+	{
+		lock_guard<mutex> guard(server->state_lock);
+		if (server->server_state != QuackServerState::WAITING_TO_START) {
+			return;
+		}
+		server->server_state = QuackServerState::RUNNING;
+	}
 	try {
 		server->server->listen_after_bind();
 	} catch (...) {
-		server->is_running = false;
+		server->server_state = QuackServerState::CLOSED;
 	}
 }
 
@@ -97,17 +106,26 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 	if (!server->is_valid()) {
 		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri_p.Uri(), uri_p.Http());
 	}
-	is_running = true;
 
-	// Bind synchronously here so that bind() failures (e.g. EADDRINUSE)
-	// propagate to the caller of quack_serve()
-	if (!server->bind_to_port(uri_p.Host(), uri_p.Port())) {
+	bool success;
+	if (uri_p.Port() == 0) {
+		int actual_port = server->bind_to_any_port(uri_p.Host());
+		success = actual_port >= 0;
+		if (success) {
+			auto bound_port = NumericCast<uint16_t>(actual_port);
+			uri = QuackUri(uri_p, bound_port);
+		}
+	} else {
+		success = server->bind_to_port(uri_p.Host(), uri_p.Port());
+	}
+	if (!success) {
 		throw IOException("Failed to bind DuckDB Quack RPC server to %s (address in use, permission denied, "
 		                  "or invalid host/port)",
 		                  uri_p.Http());
 	}
 
-	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), uri_p.Port()));
+	server_state = QuackServerState::WAITING_TO_START;
+	listen_threads.emplace_back(ListenThread, this, uri.Host(), uri.Port());
 }
 
 } // namespace duckdb

@@ -20,7 +20,7 @@ class DatabaseInstance;
 class PreparedStatement;
 class EncryptionState;
 
-enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED };
+enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED, ERROR };
 
 struct QuackConnection {
 	explicit QuackConnection(string session_id_p);
@@ -31,8 +31,8 @@ struct QuackConnection {
 	unique_ptr<QueryResult> duckdb_query_result;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 1;
-	//! Current result UUID
-	hugeint_t result_uuid;
+	//! Current query UUID
+	hugeint_t query_uuid;
 	string session_id;
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
@@ -46,6 +46,8 @@ struct QuackConnectionSnapshot {
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
 };
+
+enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
 
 class QuackServer {
 public:
@@ -109,8 +111,9 @@ protected:
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
 
-private:
 	QuackUri uri;
+
+private:
 	string token;
 };
 
@@ -124,12 +127,13 @@ public:
 	~HttpQuackServer() override;
 
 private:
-	static void ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpQuackServer *server, const string &listen_host, uint16_t listen_port);
 
 	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 
 	unique_ptr<duckdb_httplib::Server> server;
-	bool is_running = false;
+	mutex state_lock;
+	atomic<QuackServerState> server_state {QuackServerState::UNINITIALIZED};
 };
 
 } // namespace duckdb

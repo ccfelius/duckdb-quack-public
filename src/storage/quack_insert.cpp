@@ -83,8 +83,8 @@ SinkFinalizeType QuackInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 SourceResultType QuackInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
                                               OperatorSourceInput &input) const {
 	auto &insert_gstate = sink_state->Cast<QuackInsertGlobalState>();
+	chunk.data[0].Append(Value::BIGINT(NumericCast<int64_t>(insert_gstate.insert_count)));
 	chunk.SetCardinality(1);
-	chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(insert_gstate.insert_count)));
 	return SourceResultType::FINISHED;
 }
 
@@ -103,6 +103,9 @@ InsertionOrderPreservingMap<string> QuackInsert::ParamsToString() const {
 
 PhysicalOperator &QuackCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
                                            optional_ptr<PhysicalOperator> plan) {
+	if (op.return_chunk) {
+		throw NotImplementedException("RETURNING not yet supported for QUACK_INSERT");
+	}
 	D_ASSERT(plan);
 	if (!op.column_index_map.empty()) {
 		plan = planner.ResolveDefaultsProjection(op, *plan);

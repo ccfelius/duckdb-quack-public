@@ -27,8 +27,16 @@ struct QuackScanBindData : FunctionData {
 	vector<LogicalType> column_types;
 	vector<unique_ptr<DataChunkWrapper>> results;
 	shared_ptr<QuackClientConnection> client_connection;
+	optional_ptr<TableCatalogEntry> table_entry;
 	bool needs_more_fetch = true;
-	hugeint_t result_uuid;
+	hugeint_t query_uuid;
+	atomic<bool> completed;
+
+	~QuackScanBindData() override {
+		if (!completed && query_uuid != hugeint_t {0, 0}) {
+			client_connection->CancelQuery(query_uuid);
+		}
+	}
 };
 
 class TableFunction;

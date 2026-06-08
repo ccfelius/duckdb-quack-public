@@ -7,6 +7,9 @@
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/storage/database_size.hpp"
+#include "duckdb/parser/tableref/table_function_ref.hpp"
+#include "duckdb/parser/expression/constant_expression.hpp"
+#include "duckdb/parser/expression/function_expression.hpp"
 
 #include "storage/quack_catalog.hpp"
 #include "storage/quack_table.hpp"
@@ -72,7 +75,7 @@ unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(ClientCont
 	auto client_wrapper = client_connection->GetClient(context);
 	auto &client = client_wrapper->GetClient();
 	auto response =
-	    client.Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
+	    client.Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query, 0));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());
@@ -124,6 +127,22 @@ unique_ptr<LogicalOperator> QuackCatalog::BindCreateIndex(Binder &binder, Create
 
 DatabaseSize QuackCatalog::GetDatabaseSize(ClientContext &context) {
 	throw NotImplementedException("GetDatabaseSize not implemented yet");
+}
+
+unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) {
+	return RemoteExecute(context, node->ToString());
+}
+
+unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, const string &sql) {
+	vector<unique_ptr<ParsedExpression>> args;
+	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
+	args.push_back(make_uniq<ConstantExpression>(Value(sql)));
+	auto use_transaction = make_uniq<ConstantExpression>(Value::BOOLEAN(true));
+	use_transaction->SetAlias("use_transaction");
+	args.push_back(std::move(use_transaction));
+	auto func_ref = make_uniq<TableFunctionRef>();
+	func_ref->function = make_uniq<FunctionExpression>("quack_query_by_name", std::move(args));
+	return func_ref;
 }
 
 bool QuackCatalog::InMemory() {

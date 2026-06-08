@@ -1,4 +1,4 @@
-#include "quack_active_connections.hpp"
+#include "quack_activity.hpp"
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
 
@@ -17,16 +17,18 @@ static string QueryStateToString(QuackQueryState state) {
 		return "finished";
 	case QuackQueryState::CANCELLED:
 		return "cancelled";
+	case QuackQueryState::ERROR:
+		return "error";
 	default:
 		return "unknown";
 	}
 }
 
-struct QuackActiveConnectionsData : FunctionData {
+struct QuackActivityData : FunctionData {
 	bool finished = false;
 
 	unique_ptr<FunctionData> Copy() const override {
-		auto result = make_uniq<QuackActiveConnectionsData>();
+		auto result = make_uniq<QuackActivityData>();
 		result->finished = finished;
 		return result;
 	}
@@ -35,16 +37,16 @@ struct QuackActiveConnectionsData : FunctionData {
 	}
 };
 
-static unique_ptr<FunctionData> QuackActiveConnectionsBind(ClientContext &, TableFunctionBindInput &,
-                                                           vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> QuackActivityBind(ClientContext &, TableFunctionBindInput &,
+                                                  vector<LogicalType> &return_types, vector<string> &names) {
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
 	                LogicalType::TIMESTAMP};
 	names = {"server_id", "connection_id", "query", "state", "query_started_at"};
-	return make_uniq<QuackActiveConnectionsData>();
+	return make_uniq<QuackActivityData>();
 }
 
-static void QuackActiveConnectionsScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &data = input.bind_data->CastNoConst<QuackActiveConnectionsData>();
+static void QuackActivityScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
+	auto &data = input.bind_data->CastNoConst<QuackActivityData>();
 	if (data.finished) {
 		return;
 	}
@@ -64,12 +66,12 @@ static void QuackActiveConnectionsScan(ClientContext &context, TableFunctionInpu
 		}
 		row++;
 	}
-	output.SetCardinality(row);
+	output.SetChildCardinality(row);
 	data.finished = true;
 }
 
 TableFunction QuacktivityFunction::GetFunction() {
-	return TableFunction("quack_active_connections", {}, QuackActiveConnectionsScan, QuackActiveConnectionsBind);
+	return TableFunction("quack_activity", {}, QuackActivityScan, QuackActivityBind);
 }
 
 } // namespace duckdb
