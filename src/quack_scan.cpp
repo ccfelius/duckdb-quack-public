@@ -410,22 +410,4 @@ bool QuackCatalog::IsQuackScan(const string &name) {
 	return name == "quack_query" || name == "quack_query_by_name";
 }
 
-QuackCatalog &QuackCatalog::GetQuackCatalog(ClientContext &context, Value &catalog_name) {
-	if (catalog_name.IsNull()) {
-		throw BinderException("Catalog cannot be NULL");
-	}
-	// look up the database to query
-	auto db_name = catalog_name.GetValue<string>();
-	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, db_name);
-	if (!db) {
-		throw BinderException("Failed to find attached database \"%s\"", db_name);
-	}
-	auto &catalog = db->GetCatalog();
-	if (catalog.GetCatalogType() != "quack") {
-		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
-	}
-	return catalog.Cast<QuackCatalog>();
-}
-
 } // namespace duckdb

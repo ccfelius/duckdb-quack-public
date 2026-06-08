@@ -73,7 +73,6 @@ public:
 	const string &GetConnectionId();
 
 	shared_ptr<QuackClientConnection> GetClientConnection();
-	static QuackCatalog &GetQuackCatalog(ClientContext &context, Value &catalog_name);
 
 	void Refresh(ClientContext &context);
 
