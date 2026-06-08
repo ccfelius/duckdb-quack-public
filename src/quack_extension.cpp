@@ -13,7 +13,7 @@
 #include "storage/quack_optimizer.hpp"
 
 #include "include/storage/quack_catalog.hpp"
-#include "quack_activity.hpp"
+#include "quack_active_connections.hpp"
 #include "quack_clear_cache.hpp"
 #include "quack_extension.hpp"
 #include "quack_log.hpp"

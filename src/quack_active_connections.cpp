@@ -1,4 +1,4 @@
-#include "quack_activity.hpp"
+#include "quack_active_connections.hpp"
 #include "duckdb.hpp"
 #include "duckdb/main/database.hpp"
 
@@ -22,11 +22,11 @@ static string QueryStateToString(QuackQueryState state) {
 	}
 }
 
-struct QuackActivityData : FunctionData {
+struct QuackActiveConnectionsData : FunctionData {
 	bool finished = false;
 
 	unique_ptr<FunctionData> Copy() const override {
-		auto result = make_uniq<QuackActivityData>();
+		auto result = make_uniq<QuackActiveConnectionsData>();
 		result->finished = finished;
 		return result;
 	}
@@ -35,16 +35,16 @@ struct QuackActivityData : FunctionData {
 	}
 };
 
-static unique_ptr<FunctionData> QuackActivityBind(ClientContext &, TableFunctionBindInput &,
-                                                  vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> QuackActiveConnectionsBind(ClientContext &, TableFunctionBindInput &,
+                                                           vector<LogicalType> &return_types, vector<string> &names) {
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
 	                LogicalType::TIMESTAMP};
 	names = {"server_id", "connection_id", "query", "state", "query_started_at"};
-	return make_uniq<QuackActivityData>();
+	return make_uniq<QuackActiveConnectionsData>();
 }
 
-static void QuackActivityScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &data = input.bind_data->CastNoConst<QuackActivityData>();
+static void QuackActiveConnectionsScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
+	auto &data = input.bind_data->CastNoConst<QuackActiveConnectionsData>();
 	if (data.finished) {
 		return;
 	}
@@ -69,7 +69,7 @@ static void QuackActivityScan(ClientContext &context, TableFunctionInput &input,
 }
 
 TableFunction QuacktivityFunction::GetFunction() {
-	return TableFunction("quack_activity", {}, QuackActivityScan, QuackActivityBind);
+	return TableFunction("quack_active_connections", {}, QuackActiveConnectionsScan, QuackActiveConnectionsBind);
 }
 
 } // namespace duckdb
