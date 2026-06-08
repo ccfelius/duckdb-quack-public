@@ -79,7 +79,7 @@ select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is nu
 true
 
 # check client_query_id is populated on server-side logs
-query I
+query I quack_db:quack_server_con
 select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is not null and (server is null or server = '')
 ----
 true
