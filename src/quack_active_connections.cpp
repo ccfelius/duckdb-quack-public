@@ -39,9 +39,9 @@ struct QuackActiveConnectionsData : FunctionData {
 
 static unique_ptr<FunctionData> QuackActiveConnectionsBind(ClientContext &, TableFunctionBindInput &,
                                                            vector<LogicalType> &return_types, vector<string> &names) {
-	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::TIMESTAMP};
-	names = {"server_id", "connection_id", "query", "state", "query_started_at"};
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR,   LogicalType::VARCHAR,
+	                LogicalType::VARCHAR, LogicalType::TIMESTAMP, LogicalType::TIMESTAMP};
+	names = {"server_id", "connection_id", "query", "state", "query_started_at", "last_activity_at"};
 	return make_uniq<QuackActiveConnectionsData>();
 }
 
@@ -64,6 +64,9 @@ static void QuackActiveConnectionsScan(ClientContext &context, TableFunctionInpu
 		} else {
 			output.SetValue(4, row, Value::TIMESTAMP(snap.query_started_at));
 		}
+		output.SetValue(5, row,
+		                snap.last_activity_at.value == 0 ? Value(LogicalType::TIMESTAMP)
+		                                                 : Value::TIMESTAMP(snap.last_activity_at));
 		row++;
 	}
 	output.SetChildCardinality(row);

@@ -40,6 +40,8 @@ struct QuackConnection {
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
+	//! Updated on every received message; used for TTL-based eviction of idle sessions
+	timestamp_t last_activity_at {0};
 };
 
 struct QuackConnectionSnapshot {
@@ -48,6 +50,7 @@ struct QuackConnectionSnapshot {
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
+	timestamp_t last_activity_at {0};
 };
 
 enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
@@ -117,6 +120,9 @@ protected:
 	QuackUri uri;
 
 private:
+	uint64_t GetTTLSeconds();
+	void EvictExpiredConnections(int64_t ttl_us, timestamp_t now);
+
 	string token;
 };
 

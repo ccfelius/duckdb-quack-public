@@ -36,15 +36,43 @@ QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const 
 QuackServer::~QuackServer() {
 }
 
+uint64_t QuackServer::GetTTLSeconds() {
+	auto db = db_ptr.lock();
+	if (!db) {
+		return 0;
+	}
+	Value ttl_val;
+	if (!DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_session_ttl_seconds", ttl_val)) {
+		return 0;
+	}
+	return ttl_val.GetValue<uint64_t>();
+}
+
+// Caller must hold active_connections_mutex.
+void QuackServer::EvictExpiredConnections(int64_t ttl_us, timestamp_t now) {
+	for (auto it = active_connections.begin(); it != active_connections.end();) {
+		if (now.value - it->second->last_activity_at.value > ttl_us) {
+			it = active_connections.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
 vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
 	vector<QuackConnectionSnapshot> result;
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	auto ttl_seconds = GetTTLSeconds();
+	if (ttl_seconds > 0) {
+		EvictExpiredConnections(static_cast<int64_t>(ttl_seconds) * 1'000'000LL, Timestamp::GetCurrentTimestamp());
+	}
 	for (auto &[id, conn] : active_connections) {
 		QuackConnectionSnapshot snapshot;
 		snapshot.session_id = conn->session_id;
 		snapshot.sql_query = conn->sql_query;
 		snapshot.query_state = conn->query_state;
 		snapshot.query_started_at = conn->query_started_at;
+		snapshot.last_activity_at = conn->last_activity_at;
 		result.push_back(std::move(snapshot));
 	}
 	return result;
@@ -52,15 +80,20 @@ vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
 
 shared_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
-	auto it = active_connections.find(connection_id);
-	if (it != active_connections.end()) {
-		return it->second;
+	auto ttl_seconds = GetTTLSeconds();
+	if (ttl_seconds > 0) {
+		EvictExpiredConnections(static_cast<int64_t>(ttl_seconds) * 1'000'000LL, Timestamp::GetCurrentTimestamp());
 	}
-	return nullptr;
+	auto it = active_connections.find(connection_id);
+	return (it == active_connections.end()) ? nullptr : it->second;
 }
 
 string QuackServer::CreateNewConnection(const string &session_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	auto ttl_seconds = GetTTLSeconds();
+	if (ttl_seconds > 0) {
+		EvictExpiredConnections(static_cast<int64_t>(ttl_seconds) * 1'000'000LL, Timestamp::GetCurrentTimestamp());
+	}
 
 	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
@@ -72,6 +105,7 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
+	new_connection->last_activity_at = Timestamp::GetCurrentTimestamp();
 	active_connections[session_id] = std::move(new_connection);
 	return session_id;
 }
@@ -222,6 +256,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 		if (!connection) {
 			return make_uniq<ErrorResponse>("Invalid connection id");
 		}
+		connection->last_activity_at = Timestamp::GetCurrentTimestamp();
 	}
 
 	// now deserialize the actual message
@@ -229,6 +264,10 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 
 	// process the message
 	auto response = HandleMessageInternal(*db, *received_message, connection);
+
+	if (connection) {
+		connection->last_activity_at = Timestamp::GetCurrentTimestamp();
+	}
 
 	if (should_log) {
 		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
