@@ -40,6 +40,10 @@ struct QuackConnection {
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
+	//! Updated after every response — used to evict idle sessions (IDLE state TTL)
+	timestamp_t last_activity_at {0};
+	//! Set when the query transitions to FINISHED / CANCELLED / ERROR — used for result TTL
+	timestamp_t result_ready_at {0};
 };
 
 struct QuackConnectionSnapshot {
@@ -48,6 +52,8 @@ struct QuackConnectionSnapshot {
 	string sql_query;
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
+	timestamp_t last_activity_at {0};
+	timestamp_t result_ready_at {0};
 };
 
 enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
@@ -117,6 +123,11 @@ protected:
 	QuackUri uri;
 
 private:
+	uint64_t GetSettingUInt64(const string &setting_name);
+	//! Evict sessions based on their state and the configured TTLs.
+	//! Must be called while holding active_connections_mutex.
+	void EvictExpiredConnections(timestamp_t now, int64_t session_ttl_us, int64_t result_ttl_us);
+
 	string token;
 };
 

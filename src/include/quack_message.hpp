@@ -213,6 +213,15 @@ public:
 	const idx_t MaximumSupportedQuackVersion() const {
 		return max_supported_quack_version;
 	}
+	//! Non-empty when the client wants to resume an existing dormant session
+	//! rather than open a fresh one.  The server re-authenticates with the
+	//! same credentials and returns the existing session_id on success.
+	const string &ResumeSessionId() const {
+		return resume_session_id;
+	}
+	void SetResumeSessionId(string id) {
+		resume_session_id = std::move(id);
+	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ConnectionRequestMessage> Deserialize(Deserializer &deserializer);
 
@@ -226,6 +235,7 @@ private:
 	string client_platform;
 	idx_t min_supported_quack_version;
 	idx_t max_supported_quack_version;
+	string resume_session_id; // empty = new session, non-empty = resume attempt
 };
 
 class ConnectionResponseMessage : public QuackMessage {

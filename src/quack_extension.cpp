@@ -171,6 +171,16 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
 
+	config.AddExtensionOption(
+	    "quack_session_ttl_seconds",
+	    "Seconds of inactivity before an idle session (no pending result) is evicted. 0 = disabled.",
+	    LogicalType::UBIGINT, Value::UBIGINT(300), nullptr, SetScope::GLOBAL);
+
+	config.AddExtensionOption(
+	    "quack_result_ttl_seconds",
+	    "Seconds a finished/cancelled result waits for the client to reconnect and FETCH. 0 = disabled.",
+	    LogicalType::UBIGINT, Value::UBIGINT(60), nullptr, SetScope::GLOBAL);
+
 	// Process-wide fallback anchor for whoami().uptime when whoami_started_at isn't set.
 	// Stored as BIGINT epoch-microseconds to stay TZ-invariant regardless of ICU state.
 	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load", LogicalType::BIGINT,

@@ -36,15 +36,59 @@ QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const 
 QuackServer::~QuackServer() {
 }
 
+uint64_t QuackServer::GetSettingUInt64(const string &setting_name) {
+	auto db = db_ptr.lock();
+	if (!db) {
+		return 0;
+	}
+	Value val;
+	if (!DBConfig::GetConfig(*db).TryGetCurrentSetting(setting_name, val)) {
+		return 0;
+	}
+	return val.GetValue<uint64_t>();
+}
+
+void QuackServer::EvictExpiredConnections(timestamp_t now, int64_t session_ttl_us, int64_t result_ttl_us) {
+	for (auto it = active_connections.begin(); it != active_connections.end();) {
+		auto &conn = *it->second;
+		bool evict = false;
+		switch (conn.query_state) {
+		case QuackQueryState::ACTIVE:
+			// Never evict while a query is running — the client may reconnect to fetch the result.
+			break;
+		case QuackQueryState::IDLE:
+			// No result pending. Evict if the client has been silent for longer than the session TTL.
+			evict = session_ttl_us > 0 && (now.value - conn.last_activity_at.value > session_ttl_us);
+			break;
+		case QuackQueryState::FINISHED:
+		case QuackQueryState::CANCELLED:
+		case QuackQueryState::QUACK_ERROR:
+			// A result (or error) is waiting. Give the client result_ttl seconds to reconnect and FETCH.
+			evict = result_ttl_us > 0 && (now.value - conn.result_ready_at.value > result_ttl_us);
+			break;
+		}
+		if (evict) {
+			it = active_connections.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
 vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
 	vector<QuackConnectionSnapshot> result;
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	auto session_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_session_ttl_seconds")) * 1'000'000LL;
+	auto result_ttl_us  = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds"))  * 1'000'000LL;
+	EvictExpiredConnections(Timestamp::GetCurrentTimestamp(), session_ttl_us, result_ttl_us);
 	for (auto &[id, conn] : active_connections) {
 		QuackConnectionSnapshot snapshot;
 		snapshot.session_id = conn->session_id;
 		snapshot.sql_query = conn->sql_query;
 		snapshot.query_state = conn->query_state;
 		snapshot.query_started_at = conn->query_started_at;
+		snapshot.last_activity_at = conn->last_activity_at;
+		snapshot.result_ready_at  = conn->result_ready_at;
 		result.push_back(std::move(snapshot));
 	}
 	return result;
@@ -64,6 +108,10 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 
 	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
+	auto session_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_session_ttl_seconds")) * 1'000'000LL;
+	auto result_ttl_us  = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds"))  * 1'000'000LL;
+	EvictExpiredConnections(Timestamp::GetCurrentTimestamp(), session_ttl_us, result_ttl_us);
+
 	auto db = db_ptr.lock();
 	if (!db) {
 		throw InternalException("Database was closed");
@@ -72,6 +120,7 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
+	new_connection->last_activity_at = Timestamp::GetCurrentTimestamp();
 	active_connections[session_id] = std::move(new_connection);
 	return session_id;
 }
@@ -230,6 +279,12 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	// process the message
 	auto response = HandleMessageInternal(*db, *received_message, connection);
 
+	// Record that the client was alive at the completion of this request.
+	// Used by the IDLE-state TTL to decide when to evict dormant sessions.
+	if (connection) {
+		connection->last_activity_at = Timestamp::GetCurrentTimestamp();
+	}
+
 	if (should_log) {
 		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
 		                       .time_since_epoch()
@@ -276,6 +331,25 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		if (connection_request_message.MinimumSupportedQuackVersion() > 1ULL) {
 			return make_uniq<ErrorResponse>("Unsupported Quack version - server only supports version 1 of quack");
 		}
+
+		// Resume path: client wants to reconnect to an existing dormant session.
+		const auto &resume_id = connection_request_message.ResumeSessionId();
+		if (!resume_id.empty()) {
+			auto existing = GetConnection(resume_id);
+			if (existing) {
+				auto auth_result = EvaluateAuthQuery(
+				    db,
+				    StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
+				    Value(resume_id), Value(connection_request_message.AuthString()), Value(Token()));
+				if (!auth_result.IsNull() &&
+				    !(auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
+					existing->last_activity_at = Timestamp::GetCurrentTimestamp();
+					return make_uniq<ConnectionResponseMessage>(existing->session_id);
+				}
+			}
+			// Session not found or auth failed — fall through to create a fresh session.
+		}
+
 		string session_id = GenerateSessionId();
 		auto auth_result = EvaluateAuthQuery(
 		    db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
@@ -322,13 +396,14 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 				auto response = make_uniq<ErrorResponse>(query_result->GetErrorObject());
 				connection.duckdb_query_result.reset();
 				connection.query_state = QuackQueryState::CANCELLED;
+				connection.result_ready_at = Timestamp::GetCurrentTimestamp();
 				return response;
 			}
 			if (query_result->names.empty()) {
 				connection.sql_query = "";
-				auto response = make_uniq<ErrorResponse>(query_result->GetErrorObject());
 				connection.duckdb_query_result.reset();
 				connection.query_state = QuackQueryState::QUACK_ERROR;
+				connection.result_ready_at = Timestamp::GetCurrentTimestamp();
 				return make_uniq<ErrorResponse>("Query did not return any columns");
 			}
 
@@ -357,6 +432,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto needs_more_fetch = results.size() == max_chunks_per_batch;
 		if (!needs_more_fetch && connection.query_state == QuackQueryState::ACTIVE) {
 			connection.query_state = QuackQueryState::FINISHED;
+			connection.result_ready_at = Timestamp::GetCurrentTimestamp();
 		}
 		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch,
 		                                         connection.query_uuid);
@@ -394,6 +470,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto assigned_batch_index = connection.next_batch_index++;
 		if (results.size() < max_chunks_per_batch && connection.query_state == QuackQueryState::ACTIVE) {
 			connection.query_state = QuackQueryState::FINISHED;
+			connection.result_ready_at = Timestamp::GetCurrentTimestamp();
 		}
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
@@ -447,6 +524,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		}
 		connection.duckdb_connection->Interrupt();
 		connection.query_state = QuackQueryState::CANCELLED;
+		connection.result_ready_at = Timestamp::GetCurrentTimestamp();
 		connection.duckdb_query_result.reset();
 		return make_uniq<SuccessResponse>();
 	}
