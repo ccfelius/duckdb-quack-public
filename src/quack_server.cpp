@@ -518,7 +518,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	case MessageType::CANCEL_REQUEST: {
 		auto &cancel_request_message = received_message.Cast<CancelRequestMessage>();
 		auto &connection = *connection_p;
-		if (connection.query_uuid != cancel_request_message.query_uuid) {
+		// {0,0} is a wildcard — cancel whatever query is running on this connection
+		bool is_wildcard = cancel_request_message.query_uuid == hugeint_t {0, 0};
+		if (!is_wildcard && connection.query_uuid != cancel_request_message.query_uuid) {
 			return make_uniq<ErrorResponse>("Attempted to cancel a different query with id '%d' instead of '%d'",
 			                                cancel_request_message.query_uuid, connection.query_uuid);
 		}
