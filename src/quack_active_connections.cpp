@@ -39,11 +39,9 @@ struct QuackActiveConnectionsData : FunctionData {
 
 static unique_ptr<FunctionData> QuackActiveConnectionsBind(ClientContext &, TableFunctionBindInput &,
                                                            vector<LogicalType> &return_types, vector<string> &names) {
-	return_types = {LogicalType::VARCHAR,   LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::VARCHAR,   LogicalType::TIMESTAMP, LogicalType::TIMESTAMP,
-	                LogicalType::TIMESTAMP};
-	names = {"server_id", "connection_id", "query", "state",
-	         "query_started_at", "last_activity_at", "result_ready_at"};
+	return_types = {LogicalType::VARCHAR,   LogicalType::VARCHAR,   LogicalType::VARCHAR,  LogicalType::VARCHAR,
+	                LogicalType::TIMESTAMP, LogicalType::TIMESTAMP, LogicalType::TIMESTAMP};
+	names = {"server_id", "connection_id", "query", "state", "query_started_at", "last_activity_at", "result_ready_at"};
 	return make_uniq<QuackActiveConnectionsData>();
 }
 
@@ -61,15 +59,15 @@ static void QuackActiveConnectionsScan(ClientContext &context, TableFunctionInpu
 		output.SetValue(1, row, snap.session_id);
 		output.SetValue(2, row, snap.sql_query);
 		output.SetValue(3, row, Value(QueryStateToString(snap.query_state)));
-		output.SetValue(4, row, snap.query_state == QuackQueryState::IDLE
-		                            ? Value(LogicalType::TIMESTAMP)
-		                            : Value::TIMESTAMP(snap.query_started_at));
-		output.SetValue(5, row, snap.last_activity_at.value == 0
-		                            ? Value(LogicalType::TIMESTAMP)
-		                            : Value::TIMESTAMP(snap.last_activity_at));
-		output.SetValue(6, row, snap.result_ready_at.value == 0
-		                            ? Value(LogicalType::TIMESTAMP)
-		                            : Value::TIMESTAMP(snap.result_ready_at));
+		output.SetValue(4, row,
+		                snap.query_state == QuackQueryState::IDLE ? Value(LogicalType::TIMESTAMP)
+		                                                          : Value::TIMESTAMP(snap.query_started_at));
+		output.SetValue(5, row,
+		                snap.last_activity_at.value == 0 ? Value(LogicalType::TIMESTAMP)
+		                                                 : Value::TIMESTAMP(snap.last_activity_at));
+		output.SetValue(6, row,
+		                snap.result_ready_at.value == 0 ? Value(LogicalType::TIMESTAMP)
+		                                                : Value::TIMESTAMP(snap.result_ready_at));
 		row++;
 	}
 	output.SetChildCardinality(row);

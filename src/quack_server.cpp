@@ -79,7 +79,7 @@ vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
 	vector<QuackConnectionSnapshot> result;
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 	auto session_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_session_ttl_seconds")) * 1'000'000LL;
-	auto result_ttl_us  = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds"))  * 1'000'000LL;
+	auto result_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds")) * 1'000'000LL;
 	EvictExpiredConnections(Timestamp::GetCurrentTimestamp(), session_ttl_us, result_ttl_us);
 	for (auto &[id, conn] : active_connections) {
 		QuackConnectionSnapshot snapshot;
@@ -88,7 +88,7 @@ vector<QuackConnectionSnapshot> QuackServer::GetActiveConnectionSnap() {
 		snapshot.query_state = conn->query_state;
 		snapshot.query_started_at = conn->query_started_at;
 		snapshot.last_activity_at = conn->last_activity_at;
-		snapshot.result_ready_at  = conn->result_ready_at;
+		snapshot.result_ready_at = conn->result_ready_at;
 		result.push_back(std::move(snapshot));
 	}
 	return result;
@@ -109,7 +109,7 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
 	auto session_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_session_ttl_seconds")) * 1'000'000LL;
-	auto result_ttl_us  = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds"))  * 1'000'000LL;
+	auto result_ttl_us = static_cast<int64_t>(GetSettingUInt64("quack_result_ttl_seconds")) * 1'000'000LL;
 	EvictExpiredConnections(Timestamp::GetCurrentTimestamp(), session_ttl_us, result_ttl_us);
 
 	auto db = db_ptr.lock();
@@ -338,8 +338,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			auto existing = GetConnection(resume_id);
 			if (existing) {
 				auto auth_result = EvaluateAuthQuery(
-				    db,
-				    StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
+				    db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
 				    Value(resume_id), Value(connection_request_message.AuthString()), Value(Token()));
 				if (!auth_result.IsNull() &&
 				    !(auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
