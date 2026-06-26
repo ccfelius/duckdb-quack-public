@@ -9,6 +9,7 @@
 #include "duckdb/common/unordered_map.hpp"
 
 #include "quack_uri.hpp"
+#include "quack_message.hpp"
 
 #include "httplib.hpp" // TODO forward declare
 
@@ -25,13 +26,27 @@ class EncryptionState;
 
 enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED, QUACK_ERROR };
 
+//! Eagerly-materialized result cache for the last executed query on a connection.
+//! Small results (≤ quack_cache_max_rows) are kept after serving for reconnect support;
+//! large results are freed immediately after the last batch is sent.
+struct QuackResultCache {
+	vector<LogicalType> types;
+	vector<string> names;
+	vector<unique_ptr<DataChunkWrapper>> chunks;
+	idx_t next_chunk_idx = 0;
+	idx_t total_rows = 0;
+	timestamp_t created_at {0};
+	//! If false, cache is freed once all chunks have been served
+	bool persistent = true;
+};
+
 struct QuackConnection {
 	explicit QuackConnection(string session_id_p);
 	~QuackConnection();
 
 	mutex lock;
 	unique_ptr<Connection> duckdb_connection;
-	unique_ptr<QueryResult> duckdb_query_result;
+	unique_ptr<QuackResultCache> result_cache;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 1;
 	//! Current query UUID

@@ -175,6 +175,16 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "Send an acknowledgement to the server after a query completes", LogicalType::BOOLEAN,
 	                          Value::BOOLEAN(false));
 
+	config.AddExtensionOption("quack_cache_max_rows",
+	                          "Maximum number of rows to keep in the server-side result cache (0 = no limit). "
+	                          "Results exceeding this limit are served then discarded immediately.",
+	                          LogicalType::UBIGINT, Value::UBIGINT(10000));
+
+	config.AddExtensionOption("quack_result_ttl",
+	                          "Time-to-live for the server-side result cache in seconds (0 = no expiry). "
+	                          "Cached results older than this value are discarded; subsequent FETCHes return an error.",
+	                          LogicalType::UBIGINT, Value::UBIGINT(0));
+
 	// Process-wide fallback anchor for whoami().uptime when whoami_started_at isn't set.
 	// Stored as BIGINT epoch-microseconds to stay TZ-invariant regardless of ICU state.
 	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load", LogicalType::BIGINT,
